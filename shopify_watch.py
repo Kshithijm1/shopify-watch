@@ -23,18 +23,21 @@ ALERT_EMAIL = os.environ.get("ALERT_EMAIL", "").strip()
 RUN_SECONDS = int(os.environ.get("RUN_SECONDS", "20700"))
 INTERVAL_SECONDS = 60
 
+# shopify.com/careers embeds every open role's slug in its raw HTML (114 as of Nov 2026),
+# even the ones hidden behind "Load more", so one fetch covers the full list.
+# Query params are ignored by the page and /careers/search returns 429, so don't add more URLs.
 URLS = [
     "https://www.shopify.com/careers",
-    "https://www.shopify.com/careers?keywords=intern",
-    "https://www.shopify.com/careers/search?keywords=intern",
     "https://internships.shopify.com/",
 ]
 
 STATE_FILE = Path(__file__).with_name("state.json")
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130 Safari/537.36"
 
-ROLE_LINK = re.compile(r'href="((?:https://www\.shopify\.com)?/careers/[a-z0-9\-]+_[0-9a-f\-]{36})"', re.I)
-INTERN_WORDS = re.compile(r"intern", re.I)
+# Role slugs look like  software-engineering-internships-summer-2027_<uuid>
+ROLE_SLUG = re.compile(r"([a-z0-9][a-z0-9\-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.I)
+# Match intern / interns / internship(s) but not internal / international
+INTERN_WORDS = re.compile(r"(^|-)intern(s|ship|ships)?(-|_|$)", re.I)
 INTERN_PAGE_HINTS = re.compile(
     r"(apply now|applications (are )?(now )?open|20\d\d[^<]{0,40}(summer|fall|winter))", re.I
 )
@@ -82,12 +85,12 @@ def check(state):
         except Exception as e:
             print(f"[fetch failed] {url}: {e}", file=sys.stderr)
             continue
-        for m in ROLE_LINK.finditer(html):
-            link = m.group(1)
-            if link.startswith("/"):
-                link = "https://www.shopify.com" + link
-            if INTERN_WORDS.search(link):
-                found_links.add(link)
+        if "shopify.com/careers" in url:
+            slugs = set(m.group(1) for m in ROLE_SLUG.finditer(html))
+            print(f"{len(slugs)} open roles on careers page", flush=True)
+            for slug in slugs:
+                if INTERN_WORDS.search(slug.split("_")[0]):
+                    found_links.add(f"https://www.shopify.com/careers/{slug}")
         if "internships.shopify.com" in url:
             hints = sorted(set(h.group(0).strip().lower() for h in INTERN_PAGE_HINTS.finditer(html)))
             snippet = "|".join(hints)

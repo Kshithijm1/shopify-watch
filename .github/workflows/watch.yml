@@ -1,0 +1,42 @@
+name: shopify-watch
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # just a restart safety net; each run loops for ~5h45m
+  workflow_dispatch:
+
+# Only one watcher at a time. A new scheduled run waits in the queue and
+# starts the moment the current one finishes, so checking stays continuous.
+concurrency:
+  group: shopify-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Watch Shopify (checks every 60s)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+        run: python shopify_watch.py
+
+      - name: Save seen postings
+        if: always()
+        run: |
+          git config user.name "shopify-watch-bot"
+          git config user.email "shopify-watch-bot@users.noreply.github.com"
+          git add state.json || true
+          git commit -m "update seen postings" || echo "no changes"
+          git pull --rebase || true
+          git push || true
